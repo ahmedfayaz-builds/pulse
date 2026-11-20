@@ -323,6 +323,8 @@ export component AppWindow inherits Window {
     in-out property <[string]> run-history: [];
     in-out property <int> direction-idx: 1;
     in-out property <int> protocol-idx: 0;
+    in-out property <int> stop-mode-idx: 0; // 0=Time(s), 1=Bytes(M/K), 2=Blocks
+    in-out property <int> congestion-idx: 0; // 0=auto, 1=cubic, 2=bbr, 3=reno
     in-out property <string> parallel-streams: "4";
     in-out property <string> duration-secs: "10";
     in-out property <string> omit-secs: "2";
@@ -331,7 +333,6 @@ export component AppWindow inherits Window {
     in-out property <string> window-size: "";
     in-out property <string> mss-size: "";
     in-out property <string> dscp-val: "";
-    in-out property <string> congestion-algo: "";
     in-out property <string> bind-ip: "";
     in-out property <bool> server-one-off: false;
     in-out property <string> custom-iperf-path: "";
@@ -991,18 +992,28 @@ export component AppWindow inherits Window {
                         }
                         VerticalLayout {
                             spacing: 3px;
-                            Text { text: "Duration (-t)"; color: text-muted; font-size: 11px; }
-                            LineEdit { text <=> duration-secs; width: 64px; enabled: !is-running; edited => { config-changed(); } }
+                            Text { text: "Stop By"; color: text-muted; font-size: 11px; }
+                            ComboBox {
+                                model: ["Time (s)", "Bytes (-n)", "Blocks (-k)"];
+                                current-index <=> stop-mode-idx;
+                                enabled: !is-running;
+                                selected => { config-changed(); }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: stop-mode-idx == 0 ? "Seconds (-t)" : (stop-mode-idx == 1 ? "Size (e.g. 100M)" : "Blocks (-k)"); color: text-muted; font-size: 11px; }
+                            LineEdit { text <=> duration-secs; width: 76px; enabled: !is-running; edited => { config-changed(); } }
                         }
                         VerticalLayout {
                             spacing: 3px;
                             Text { text: "Omit (-O)"; color: text-muted; font-size: 11px; }
-                            LineEdit { text <=> omit-secs; width: 64px; enabled: !is-running; edited => { config-changed(); } }
+                            LineEdit { text <=> omit-secs; width: 58px; enabled: !is-running; edited => { config-changed(); } }
                         }
                         VerticalLayout {
                             spacing: 3px;
                             Text { text: "Interval (-i)"; color: text-muted; font-size: 11px; }
-                            LineEdit { text <=> interval-secs; width: 64px; enabled: !is-running; edited => { config-changed(); } }
+                            LineEdit { text <=> interval-secs; width: 58px; enabled: !is-running; edited => { config-changed(); } }
                         }
                     }
 
@@ -1011,7 +1022,17 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             spacing: 3px;
                             Text { text: "UDP Rate (-b)"; color: text-muted; font-size: 11px; }
-                            LineEdit { text <=> udp-bandwidth; width: 88px; enabled: !is-running; edited => { config-changed(); } }
+                            LineEdit { text <=> udp-bandwidth; width: 88px; placeholder-text: "10M or 10M/5"; enabled: !is-running; edited => { config-changed(); } }
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "Congestion (-C)"; color: text-muted; font-size: 11px; }
+                            ComboBox {
+                                model: ["auto", "cubic", "bbr", "reno"];
+                                current-index <=> congestion-idx;
+                                enabled: !is-running;
+                                selected => { config-changed(); }
+                            }
                         }
                         VerticalLayout {
                             spacing: 3px;

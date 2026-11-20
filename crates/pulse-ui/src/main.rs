@@ -18,6 +18,13 @@ use tokio_util::sync::CancellationToken;
 
 slint::include_modules!();
 
+fn parse_udp_rate_and_burst(s: &str) -> (u64, Option<u32>) {
+    let mut parts = s.trim().splitn(2, '/');
+    let rate = parse_bps_rate(parts.next().unwrap_or("10M"));
+    let burst = parts.next().and_then(|b| b.trim().parse::<u32>().ok());
+    (rate, burst)
+}
+
 fn parse_bps_rate(s: &str) -> u64 {
     let t = s.trim().to_uppercase();
     if let Some(num) = t.strip_suffix('G') {
@@ -63,20 +70,29 @@ fn build_config_from_ui(ui: &AppWindow) -> TestConfig {
         _ => Direction::Bidirectional,
     };
 
-    let congestion = match ui.get_congestion_algo().trim().to_lowercase().as_str() {
-        "cubic" => Some(CongestionAlgo::Cubic),
-        "bbr" => Some(CongestionAlgo::Bbr),
-        "reno" => Some(CongestionAlgo::Reno),
+    let congestion = match ui.get_congestion_idx() {
+        1 => Some(CongestionAlgo::Cubic),
+        2 => Some(CongestionAlgo::Bbr),
+        3 => Some(CongestionAlgo::Reno),
         _ => None,
     };
 
     let protocol = match ui.get_protocol_idx() {
-        1 => Protocol::Udp {
-            target_bps: parse_bps_rate(&ui.get_udp_bandwidth()),
-            burst_packets: None,
-        },
+        1 => {
+            let (target_bps, burst_packets) = parse_udp_rate_and_burst(&ui.get_udp_bandwidth());
+            Protocol::Udp {
+                target_bps,
+                burst_packets,
+            }
+        }
         2 => Protocol::Sctp,
         _ => Protocol::Tcp { congestion },
+    };
+
+    let stop = match ui.get_stop_mode_idx() {
+        1 => StopCondition::Bytes(parse_size_bytes(&ui.get_duration_secs()).unwrap_or(100 * 1024 * 1024)),
+        2 => StopCondition::Blocks(ui.get_duration_secs().trim().parse::<u64>().unwrap_or(1000)),
+        _ => StopCondition::Seconds(ui.get_duration_secs().trim().parse::<u32>().unwrap_or(10)),
     };
 
     TestConfig {
@@ -92,7 +108,7 @@ fn build_config_from_ui(ui: &AppWindow) -> TestConfig {
             let d = ui.get_dscp_val().trim().to_string();
             if d.is_empty() { None } else { Some(d) }
         },
-        stop: StopCondition::Seconds(ui.get_duration_secs().trim().parse::<u32>().unwrap_or(10)),
+        stop,
         omit_seconds: ui.get_omit_secs().trim().parse::<u32>().unwrap_or(0),
         interval_secs: ui.get_interval_secs().trim().parse::<f32>().unwrap_or(1.0),
     }
@@ -125,6 +141,7 @@ fn apply_preset_to_ui(ui: &AppWindow, idx: i32) {
         Protocol::Sctp => ui.set_protocol_idx(2),
     }
     ui.set_parallel_streams(cfg.parallel_streams.to_string().into());
+    ui.set_stop_mode_idx(0);
     if let StopCondition::Seconds(s) = cfg.stop {
         ui.set_duration_secs(s.to_string().into());
     }

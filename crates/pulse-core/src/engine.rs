@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream, UdpSocket};
+use tokio::net::{TcpListener, TcpSocket, TcpStream, UdpSocket};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -162,11 +162,38 @@ pub async fn run_native(
     res
 }
 
+async fn connect_tcp_with_opts(
+    target: SocketAddr,
+    bind_addr: Option<std::net::IpAddr>,
+    window_bytes: Option<u64>,
+) -> std::io::Result<TcpStream> {
+    let sock = if target.is_ipv6() {
+        TcpSocket::new_v6()?
+    } else {
+        TcpSocket::new_v4()?
+    };
+    if let Some(ip) = bind_addr {
+        sock.bind(SocketAddr::new(ip, 0))?;
+    }
+    if let Some(w) = window_bytes {
+        let w32 = w.min(u32::MAX as u64) as u32;
+        let _ = sock.set_send_buffer_size(w32);
+        let _ = sock.set_recv_buffer_size(w32);
+    }
+    let stream = sock.connect(target).await?;
+    let _ = stream.set_nodelay(true);
+    Ok(stream)
+}
+
 async fn run_native_client(
     cfg: &TestConfig,
     tx: &mpsc::Sender<TelemetryMsg>,
     cancel: &CancellationToken,
 ) -> anyhow::Result<()> {
+    if matches!(cfg.protocol, Protocol::Sctp) {
+        anyhow::bail!("SCTP is not supported in built-in engine; specify external iperf3 in Pro Inspector");
+    }
+
     let host = match &cfg.mode {
         Mode::Client { host } => host.trim(),
         _ => anyhow::bail!("Expected Client mode"),
@@ -188,9 +215,11 @@ async fn run_native_client(
         other => anyhow::bail!("Unexpected handshake state: {other}"),
     }
 
-    let (is_udp, blksize, bandwidth) = match cfg.protocol {
-        Protocol::Tcp { .. } | Protocol::Sctp => (false, DEFAULT_TCP_BLKSIZE, 0),
-        Protocol::Udp { target_bps, .. } => (true, DEFAULT_UDP_BLKSIZE, target_bps),
+    let (is_udp, blksize, bandwidth, burst_pkts) = match cfg.protocol {
+        Protocol::Tcp { .. } | Protocol::Sctp => (false, DEFAULT_TCP_BLKSIZE, 0, 1),
+        Protocol::Udp { target_bps, burst_packets } => {
+            (true, DEFAULT_UDP_BLKSIZE, target_bps, burst_packets.unwrap_or(1).max(1))
+        }
     };
 
     let (time, num, blockcount) = match cfg.stop {
@@ -227,15 +256,19 @@ async fn run_native_client(
     for _ in 0..cfg.parallel_streams {
         counters.push(Arc::new(StreamCounters::default()));
         if is_udp {
-            let bind_ip = if peer_addr.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" };
-            let sock = UdpSocket::bind(bind_ip).await?;
+            let bind_sock = match cfg.bind_addr {
+                Some(ip) => SocketAddr::new(ip, 0).to_string(),
+                None if peer_addr.is_ipv6() => "[::]:0".to_string(),
+                None => "0.0.0.0:0".to_string(),
+            };
+            let sock = UdpSocket::bind(&bind_sock).await?;
             sock.connect(peer_addr).await?;
             // Standard iperf3 UDP connect magic: 4-byte 123456789
             sock.send(&123_456_789_u32.to_be_bytes()).await?;
             udp_sockets.push(Arc::new(sock));
         } else {
-            let mut s = TcpStream::connect(peer_addr).await?;
-            s.set_nodelay(true)?;
+            let s = connect_tcp_with_opts(peer_addr, cfg.bind_addr, cfg.window_bytes).await?;
+            let mut s = s;
             s.write_all(&cookie).await?;
             tcp_streams.push(s);
         }
@@ -283,7 +316,7 @@ async fn run_native_client(
                 if dir == Direction::ReverseDownload {
                     run_udp_recv_loop(sock, c, tok).await;
                 } else {
-                    run_udp_send_loop(sock, blksize, per_stream_bps, total_limit, c, tok).await;
+                    run_udp_send_loop(sock, blksize, per_stream_bps, burst_pkts, total_limit, c, tok).await;
                 }
             }));
         }
@@ -310,6 +343,8 @@ async fn run_native_client(
 
     let mut prev_bytes = vec![0u64; counters.len()];
     let mut prev_elapsed = 0.0_f64;
+    let mut steady_bytes = 0u64;
+    let mut steady_secs = 0.0_f64;
     let max_dur = match cfg.stop {
         StopCondition::Seconds(s) => Some(Duration::from_secs(s as u64)),
         _ => None,
@@ -380,6 +415,10 @@ async fn run_native_client(
                     }),
                 }))).await;
 
+                if !omitted {
+                    steady_bytes += sum_bytes;
+                    steady_secs += dt;
+                }
                 prev_elapsed = now_sec;
                 if let Some(limit) = max_dur {
                     if started_at.elapsed() >= limit {
@@ -412,7 +451,11 @@ async fn run_native_client(
     }
 
     let total_bytes: u64 = counters.iter().map(|c| c.bytes.load(Ordering::Relaxed)).sum();
-    let local_bps = (total_bytes as f64 * 8.0) / elapsed;
+    let local_bps = if steady_secs > 0.05 {
+        (steady_bytes as f64 * 8.0) / steady_secs
+    } else {
+        (total_bytes as f64 * 8.0) / elapsed
+    };
     let (final_jitter, final_lost, final_pkts, final_loss_pct, remote_cpu) =
         if let Some(rem) = remote_results {
             let r_lost: u64 = rem.streams.iter().map(|s| s.errors).sum();
@@ -529,7 +572,7 @@ async fn run_native_server(
             let rev = params.reverse;
             workers.push(tokio::spawn(async move {
                 if rev {
-                    run_udp_send_loop(udp_sock, blk, bw, None, c, tok).await;
+                    run_udp_send_loop(udp_sock, blk, bw, 1, None, c, tok).await;
                 } else {
                     run_udp_recv_loop(udp_sock, c, tok).await;
                 }
@@ -756,6 +799,7 @@ async fn run_udp_send_loop(
     sock: Arc<UdpSocket>,
     blksize: usize,
     target_bps: u64,
+    burst_pkts: u32,
     limit: Option<u64>,
     counter: Arc<StreamCounters>,
     cancel: CancellationToken,
@@ -763,6 +807,7 @@ async fn run_udp_send_loop(
     let mut buf = vec![0u8; blksize.max(16)];
     let pkt_bits = (blksize as f64) * 8.0;
     let interval = Duration::from_secs_f64((pkt_bits / target_bps as f64).max(0.000_05));
+    let burst = burst_pkts.max(1) as u64;
     let mut seq: u64 = 1;
     let mut sent_bytes: u64 = 0;
     let start = Instant::now();
@@ -786,11 +831,13 @@ async fn run_udp_send_loop(
         counter.bytes.fetch_add(buf.len() as u64, Ordering::Relaxed);
         counter.packets.fetch_add(1, Ordering::Relaxed);
 
-        let next_at = interval.saturating_mul(seq as u32);
-        if let Some(wait) = next_at.checked_sub(start.elapsed()) {
-            tokio::select! {
-                _ = cancel.cancelled() => break,
-                _ = tokio::time::sleep(wait) => {}
+        if seq % burst == 0 {
+            let next_at = interval.saturating_mul(seq as u32);
+            if let Some(wait) = next_at.checked_sub(start.elapsed()) {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = tokio::time::sleep(wait) => {}
+                }
             }
         }
     }

@@ -18,12 +18,15 @@ jobs:
           - os: windows-latest
             artifact: pulse-windows-x86_64.exe
             bin: target/release/pulse-ui.exe
+            universal_mac: false
           - os: ubuntu-latest
             artifact: pulse-linux-x86_64
             bin: target/release/pulse-ui
+            universal_mac: false
           - os: macos-latest
-            artifact: pulse-macos-arm64
-            bin: target/release/pulse-ui
+            artifact: pulse-macos-universal
+            bin: target/universal-apple-darwin/release/pulse-ui
+            universal_mac: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +43,19 @@ jobs:
         run: cargo test --workspace
 
       - name: Build release binary
+        if: ${{ !matrix.universal_mac }}
         run: cargo build --release -p pulse-ui
+
+      - name: Build macOS Universal binary (arm64 + x86_64)
+        if: ${{ matrix.universal_mac }}
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release -p pulse-ui --target aarch64-apple-darwin
+          cargo build --release -p pulse-ui --target x86_64-apple-darwin
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create -output target/universal-apple-darwin/release/pulse-ui \
+            target/aarch64-apple-darwin/release/pulse-ui \
+            target/x86_64-apple-darwin/release/pulse-ui
 
       - name: Stage artifact
         shell: bash
