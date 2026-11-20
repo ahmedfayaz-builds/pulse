@@ -1,0 +1,1094 @@
+import { CheckBox, ComboBox, LineEdit, Palette, ScrollView } from "std-widgets.slint";
+
+component VectorIcon inherits Path {
+    in property <color> icon-color: #94A3B8;
+    width: 14px;
+    height: 14px;
+    viewbox-x: 0;
+    viewbox-y: 0;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke: icon-color;
+    stroke-width: 2px;
+    stroke-line-cap: round;
+    stroke-line-join: round;
+}
+
+component SegmentedToggle inherits Rectangle {
+    in-out property <bool> right-active: false;
+    in property <string> left-label: "Client";
+    in property <string> right-label: "Server";
+    in property <bool> disabled: false;
+    in property <color> bg;
+    in property <color> active-bg;
+    in property <color> muted-col;
+    callback toggled(bool);
+
+    height: 34px;
+    width: 152px;
+    border-radius: 17px;
+    background: bg;
+    border-width: 1px;
+    border-color: muted-col.with-alpha(0.22);
+
+    HorizontalLayout {
+        padding: 3px;
+        spacing: 2px;
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: 14px;
+            background: !right-active ? active-bg : transparent;
+            animate background { duration: 150ms; }
+            TouchArea {
+                enabled: !disabled;
+                mouse-cursor: pointer;
+                clicked => {
+                    if (right-active) {
+                        right-active = false;
+                        toggled(false);
+                    }
+                }
+            }
+            Text {
+                text: left-label;
+                color: !right-active ? #FFFFFF : muted-col;
+                font-size: 12px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: 14px;
+            background: right-active ? active-bg : transparent;
+            animate background { duration: 150ms; }
+            TouchArea {
+                enabled: !disabled;
+                mouse-cursor: pointer;
+                clicked => {
+                    if (!right-active) {
+                        right-active = true;
+                        toggled(true);
+                    }
+                }
+            }
+            Text {
+                text: right-label;
+                color: right-active ? #FFFFFF : muted-col;
+                font-size: 12px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+component PillButton inherits Rectangle {
+    in property <string> label;
+    in property <string> icon-commands: "";
+    in property <bool> active: false;
+    in property <color> bg;
+    in property <color> border-col;
+    in property <color> text-col;
+    in property <color> accent;
+    callback clicked();
+
+    height: 32px;
+    border-radius: 16px;
+    background: active ? accent.with-alpha(0.16) : bg;
+    border-width: 1px;
+    border-color: active ? accent : border-col;
+    animate background { duration: 140ms; }
+    animate border-color { duration: 140ms; }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 6px;
+        alignment: center;
+        if icon-commands != "": VectorIcon {
+            y: (parent.height - self.height) / 2;
+            icon-color: active ? accent : text-col;
+            commands: icon-commands;
+        }
+        Text {
+            text: label;
+            color: active ? accent : text-col;
+            font-size: 12px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component TelemetryCard inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <string> subtext;
+    in property <string> spark-path;
+    in property <color> card-bg;
+    in property <color> border-col;
+    in property <color> text-primary;
+    in property <color> text-muted;
+    in property <color> accent;
+
+    background: card-bg;
+    border-width: 1px;
+    border-color: border-col;
+    border-radius: 14px;
+    height: 88px;
+
+    VerticalLayout {
+        padding: 13px;
+        spacing: 4px;
+
+        HorizontalLayout {
+            alignment: space-between;
+            HorizontalLayout {
+                spacing: 6px;
+                Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 3.5px;
+                    background: accent;
+                }
+                Text {
+                    text: label;
+                    color: text-muted;
+                    font-size: 11px;
+                    font-weight: 600;
+                    letter-spacing: 0.6px;
+                }
+            }
+            Text {
+                text: subtext;
+                color: accent;
+                font-size: 11px;
+                font-weight: 600;
+            }
+        }
+
+        HorizontalLayout {
+            alignment: space-between;
+            vertical-stretch: 1;
+            Text {
+                text: value;
+                color: text-primary;
+                font-size: 21px;
+                font-weight: 700;
+                vertical-alignment: bottom;
+            }
+            if spark-path != "": Rectangle {
+                width: 84px;
+                height: 28px;
+                y: parent.height - self.height;
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-x: 0;
+                    viewbox-y: 0;
+                    viewbox-width: 100;
+                    viewbox-height: 32;
+                    stroke: accent;
+                    stroke-width: 1.8px;
+                    commands: spark-path;
+                }
+            }
+        }
+    }
+}
+
+component ReadinessPill inherits Rectangle {
+    in property <string> title;
+    in property <string> status;
+    in property <color> pill-bg;
+    in property <color> dot-color;
+    in property <color> text-primary;
+    in property <color> text-muted;
+
+    height: 28px;
+    border-radius: 14px;
+    background: pill-bg;
+    border-width: 1px;
+    border-color: dot-color.with-alpha(0.35);
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 6px;
+        Rectangle {
+            width: 7px;
+            height: 7px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3.5px;
+            background: dot-color;
+        }
+        Text {
+            text: title + ": ";
+            color: text-muted;
+            font-size: 11px;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+        Text {
+            text: status;
+            color: text-primary;
+            font-size: 11px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Pulse — Network Telemetry & Speed";
+    icon: @image-url("../assets/pulse.png");
+    min-width: 920px;
+    min-height: 700px;
+    preferred-width: 1040px;
+    preferred-height: 760px;
+
+    // Theme Tokens + Native Widget Palette Sync
+    in-out property <bool> dark-mode: true;
+    changed dark-mode => {
+        Palette.color-scheme = dark-mode ? ColorScheme.dark : ColorScheme.light;
+    }
+    init => {
+        Palette.color-scheme = dark-mode ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    property <color> bg-canvas: dark-mode ? #0A0E14 : #F3F6FB;
+    property <color> bg-card: dark-mode ? #111822 : #FFFFFF;
+    property <color> bg-elevated: dark-mode ? #17202E : #EAF0F8;
+    property <color> border-col: dark-mode ? #1E293B : #DCE4F0;
+    property <color> text-primary: dark-mode ? #F8FAFC : #0F172A;
+    property <color> text-muted: dark-mode ? #94A3B8 : #64748B;
+    property <color> accent-cyan: dark-mode ? #06B6D4 : #0284C7;
+    property <color> accent-emerald: #10B981;
+    property <color> accent-coral: #FB7185;
+    property <color> accent-amber: #F59E0B;
+
+    // Mode, View & Target
+    in-out property <bool> is-server: false;
+    in-out property <bool> graph-mode: false; // false = Meter, true = Full Graph
+    in-out property <string> host: "127.0.0.1";
+    in-out property <string> port: "5201";
+    in-out property <bool> is-running: false;
+    in-out property <string> status-text: "READY";
+    in-out property <int> status-kind: 0; // 0=idle, 1=running, 2=done, 3=error
+    in-out property <int> active-preset: 0;
+
+    // Hero Gauge & Wave Telemetry
+    in-out property <string> gauge-value: "0.0";
+    in-out property <string> gauge-unit: "Mbps";
+    in-out property <string> direction-label: "DOWNLOAD";
+    in-out property <string> gauge-track-path: "M 42.2 197.8 A 110 110 0 1 1 197.8 197.8";
+    in-out property <string> gauge-arc-path: "";
+    in-out property <string> gauge-ticks-path: "";
+    in-out property <string> wave-stroke-path: "";
+    in-out property <string> wave-fill-path: "";
+    in-out property <string> graph-max-label: "1000 Mbps";
+    in-out property <string> graph-mid-label: "500 Mbps";
+
+    // Cards & Readiness
+    in-out property <string> live-mbps: "0.0 Mbps";
+    in-out property <string> peak-mbps: "Peak 0.0";
+    in-out property <string> health-badge: "READY";
+    in-out property <int> health-level: 0;
+    in-out property <string> health-summary: "Choose a diagnostic preset and press Start Test.";
+    in-out property <string> metric-retransmits: "—";
+    in-out property <string> metric-retransmits-sub: "TCP retries";
+    in-out property <string> metric-jitter: "—";
+    in-out property <string> metric-jitter-sub: "Variance";
+    in-out property <string> metric-loss: "—";
+    in-out property <string> metric-loss-sub: "Packet loss";
+    in-out property <string> spark-throughput: "";
+    in-out property <string> ready-stream: "Standby";
+    in-out property <string> ready-calls: "Standby";
+    in-out property <string> ready-gaming: "Standby";
+
+    // Pro Inspector, History & Logs
+    in-out property <bool> show-pro: false;
+    in-out property <bool> show-history: false;
+    in-out property <bool> show-logs: false;
+    in-out property <[string]> recent-hosts: ["127.0.0.1"];
+    in-out property <[string]> run-history: [];
+    in-out property <int> direction-idx: 1;
+    in-out property <int> protocol-idx: 0;
+    in-out property <string> parallel-streams: "4";
+    in-out property <string> duration-secs: "10";
+    in-out property <string> omit-secs: "2";
+    in-out property <string> interval-secs: "1.0";
+    in-out property <string> udp-bandwidth: "10M";
+    in-out property <string> window-size: "";
+    in-out property <string> mss-size: "";
+    in-out property <string> dscp-val: "";
+    in-out property <string> congestion-algo: "";
+    in-out property <string> bind-ip: "";
+    in-out property <bool> server-one-off: false;
+    in-out property <string> custom-iperf-path: "";
+    in-out property <string> cli-preview: "pulse-native · TCP · 4 streams · 10s";
+    in-out property <string> log-output: "";
+    in-out property <bool> has-report: false;
+
+    callback run-or-stop();
+    callback select-preset(int);
+    callback config-changed();
+    callback export-report(string);
+    callback select-recent-host(string);
+    callback theme-toggled(bool);
+
+    background: bg-canvas;
+
+    ScrollView {
+        VerticalLayout {
+            padding: 18px;
+            spacing: 14px;
+
+            // ── 1. Top Navigation & Target Bar ──────────────────────────────────
+            HorizontalLayout {
+                alignment: space-between;
+                spacing: 12px;
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    // Pulse Icon
+                    VectorIcon {
+                        y: (parent.height - self.height) / 2;
+                        width: 18px;
+                        height: 18px;
+                        icon-color: status-kind == 1 ? accent-cyan :
+                                    status-kind == 2 ? accent-emerald :
+                                    status-kind == 3 ? accent-coral : accent-cyan;
+                        commands: "M 2 12 L 6 12 L 9 4 L 14 20 L 18 12 L 22 12";
+                    }
+                    Text {
+                        text: "PULSE";
+                        color: text-primary;
+                        font-size: 17px;
+                        font-weight: 800;
+                        letter-spacing: 2px;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        height: 22px;
+                        width: 86px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 11px;
+                        background: status-kind == 1 ? accent-cyan.with-alpha(0.16) :
+                                    status-kind == 2 ? accent-emerald.with-alpha(0.16) :
+                                    status-kind == 3 ? accent-coral.with-alpha(0.16) : bg-elevated;
+                        Text {
+                            text: status-text;
+                            color: status-kind == 1 ? accent-cyan :
+                                   status-kind == 2 ? accent-emerald :
+                                   status-kind == 3 ? accent-coral : text-muted;
+                            font-size: 10px;
+                            font-weight: 700;
+                            letter-spacing: 0.8px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    SegmentedToggle {
+                        right-active <=> root.is-server;
+                        left-label: "Client";
+                        right-label: "Server";
+                        disabled: is-running;
+                        bg: bg-card;
+                        active-bg: accent-cyan;
+                        muted-col: text-muted;
+                        toggled => { config-changed(); }
+                    }
+                    LineEdit {
+                        width: 155px;
+                        height: 34px;
+                        text <=> host;
+                        enabled: !is-server && !is-running;
+                        placeholder-text: "Host / IP";
+                        edited => { config-changed(); }
+                    }
+                    LineEdit {
+                        width: 72px;
+                        height: 34px;
+                        text <=> port;
+                        enabled: !is-running;
+                        placeholder-text: "5201";
+                        edited => { config-changed(); }
+                    }
+                    PillButton {
+                        label: "History";
+                        icon-commands: "M 12 8 L 12 12 L 15 15 M 3.05 11 A 9 9 0 1 1 6 19.3 M 3 16 L 3 11 L 8 11";
+                        active: show-history;
+                        bg: bg-card;
+                        border-col: border-col;
+                        text-col: text-primary;
+                        accent: accent-cyan;
+                        clicked => { show-history = !show-history; }
+                    }
+                    PillButton {
+                        label: "Pro";
+                        // Sliders icon
+                        icon-commands: "M 4 21 L 4 14 M 4 10 L 4 3 M 12 21 L 12 12 M 12 8 L 12 3 M 20 21 L 20 16 M 20 12 L 20 3 M 1 14 L 7 14 M 9 8 L 15 8 M 17 16 L 23 16";
+                        active: show-pro;
+                        bg: bg-card;
+                        border-col: border-col;
+                        text-col: text-primary;
+                        accent: accent-cyan;
+                        clicked => { show-pro = !show-pro; }
+                    }
+                    PillButton {
+                        label: dark-mode ? "Light" : "Dark";
+                        // Sun / Moon vector icon
+                        icon-commands: dark-mode
+                            ? "M 12 3 L 12 5 M 12 19 L 12 21 M 3 12 L 5 12 M 19 12 L 21 12 M 5.6 5.6 L 7 7 M 17 17 L 18.4 18.4 M 18.4 5.6 L 17 7 M 7 17 L 5.6 18.4 M 16 12 A 4 4 0 1 1 8 12 A 4 4 0 1 1 16 12"
+                            : "M 21 12.8 A 9 9 0 1 1 11.2 3 A 7 7 0 0 0 21 12.8 Z";
+                        active: false;
+                        bg: bg-card;
+                        border-col: border-col;
+                        text-col: text-primary;
+                        accent: accent-cyan;
+                        clicked => {
+                            dark-mode = !dark-mode;
+                            theme-toggled(dark-mode);
+                        }
+                    }
+                }
+            }
+
+            // ── 2. Hero Stage: Meter / Graph Swappable ──────────────────────────
+            Rectangle {
+                min-height: 365px;
+                border-radius: 18px;
+                background: bg-card;
+                border-width: 1px;
+                border-color: border-col;
+                clip: true;
+
+                // Ambient wave behind Meter OR full primary chart in Graph mode
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-x: 0;
+                    viewbox-y: 0;
+                    viewbox-width: 900;
+                    viewbox-height: 280;
+                    fill: @linear-gradient(180deg, accent-cyan.with-alpha(graph-mode ? 0.34 : 0.20) 0%, accent-cyan.with-alpha(0.0) 100%);
+                    commands: wave-fill-path;
+                }
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-x: 0;
+                    viewbox-y: 0;
+                    viewbox-width: 900;
+                    viewbox-height: 280;
+                    stroke: accent-cyan.with-alpha(graph-mode ? 0.95 : 0.60);
+                    stroke-width: graph-mode ? 2.8px : 2.0px;
+                    commands: wave-stroke-path;
+                }
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+                    alignment: space-between;
+
+                    // Top Hero Bar: Presets + Meter/Graph Toggle + Health Badge
+                    HorizontalLayout {
+                        alignment: space-between;
+                        spacing: 10px;
+
+                        if !is-server: HorizontalLayout {
+                            spacing: 8px;
+                            PillButton {
+                                label: "Max Speed";
+                                icon-commands: "M 13 2 L 3 14 L 12 14 L 11 22 L 21 10 L 12 10 Z";
+                                active: active-preset == 0;
+                                bg: bg-elevated;
+                                border-col: border-col;
+                                text-col: text-primary;
+                                accent: accent-cyan;
+                                clicked => { select-preset(0); }
+                            }
+                            PillButton {
+                                label: "VoIP / Gaming";
+                                icon-commands: "M 6 12 L 10 12 M 8 10 L 8 14 M 15 13 L 15.01 13 M 18 11 L 18.01 11 M 5 6 L 19 6 A 4 4 0 0 1 22 10 L 22 15 A 3 3 0 0 1 17 17 L 14 14 L 10 14 L 7 17 A 3 3 0 0 1 2 15 L 2 10 A 4 4 0 0 1 5 6 Z";
+                                active: active-preset == 1;
+                                bg: bg-elevated;
+                                border-col: border-col;
+                                text-col: text-primary;
+                                accent: accent-cyan;
+                                clicked => { select-preset(1); }
+                            }
+                            PillButton {
+                                label: "Wi-Fi Roaming";
+                                icon-commands: "M 5 12.5 A 10 10 0 0 1 19 12.5 M 8.5 16 A 5 5 0 0 1 15.5 16 M 12 20 L 12.01 20 M 1.5 9 A 15 15 0 0 1 22.5 9";
+                                active: active-preset == 2;
+                                bg: bg-elevated;
+                                border-col: border-col;
+                                text-col: text-primary;
+                                accent: accent-cyan;
+                                clicked => { select-preset(2); }
+                            }
+                        }
+
+                        if is-server: Text {
+                            text: "LISTENER MODE · PORT " + port;
+                            color: text-muted;
+                            font-size: 11px;
+                            font-weight: 700;
+                            letter-spacing: 0.8px;
+                            vertical-alignment: center;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            SegmentedToggle {
+                                right-active <=> root.graph-mode;
+                                left-label: "Meter";
+                                right-label: "Graph";
+                                width: 136px;
+                                bg: bg-elevated;
+                                active-bg: accent-cyan;
+                                muted-col: text-muted;
+                            }
+                            Rectangle {
+                                height: 32px;
+                                width: 102px;
+                                border-radius: 16px;
+                                background: health-level == 1 ? accent-emerald.with-alpha(0.16) :
+                                            health-level == 2 ? accent-amber.with-alpha(0.16) :
+                                            health-level == 3 ? accent-coral.with-alpha(0.16) : bg-elevated;
+                                border-width: 1px;
+                                border-color: health-level == 1 ? accent-emerald.with-alpha(0.5) :
+                                              health-level == 2 ? accent-amber.with-alpha(0.5) :
+                                              health-level == 3 ? accent-coral.with-alpha(0.5) : border-col;
+                                Text {
+                                    text: health-badge;
+                                    color: health-level == 1 ? accent-emerald :
+                                           health-level == 2 ? accent-amber :
+                                           health-level == 3 ? accent-coral : text-muted;
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // Center Stage: Meter OR Graph Readout + CTA
+                    if !graph-mode: HorizontalLayout {
+                        alignment: center;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 6px;
+
+                            Rectangle {
+                                width: 230px;
+                                height: 205px;
+
+                                Path {
+                                    width: 230px;
+                                    height: 230px;
+                                    viewbox-x: 0;
+                                    viewbox-y: 0;
+                                    viewbox-width: 240;
+                                    viewbox-height: 240;
+                                    stroke: dark-mode ? #1E293B : #E2E8F0;
+                                    stroke-width: 10px;
+                                    stroke-line-cap: round;
+                                    commands: gauge-track-path;
+                                }
+                                Path {
+                                    width: 230px;
+                                    height: 230px;
+                                    viewbox-x: 0;
+                                    viewbox-y: 0;
+                                    viewbox-width: 240;
+                                    viewbox-height: 240;
+                                    stroke: text-muted.with-alpha(0.42);
+                                    stroke-width: 1.5px;
+                                    commands: gauge-ticks-path;
+                                }
+                                Path {
+                                    width: 230px;
+                                    height: 230px;
+                                    viewbox-x: 0;
+                                    viewbox-y: 0;
+                                    viewbox-width: 240;
+                                    viewbox-height: 240;
+                                    stroke: @linear-gradient(90deg, accent-cyan 0%, accent-emerald 100%);
+                                    stroke-width: 10px;
+                                    stroke-line-cap: round;
+                                    commands: gauge-arc-path;
+                                }
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 2px;
+                                    Text {
+                                        text: direction-label;
+                                        color: accent-cyan;
+                                        font-size: 10px;
+                                        font-weight: 700;
+                                        letter-spacing: 1.2px;
+                                        horizontal-alignment: center;
+                                    }
+                                    Text {
+                                        text: gauge-value;
+                                        color: text-primary;
+                                        font-size: 38px;
+                                        font-weight: 800;
+                                        horizontal-alignment: center;
+                                    }
+                                    Text {
+                                        text: gauge-unit;
+                                        color: text-muted;
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 152px;
+                                    height: 36px;
+                                    border-radius: 18px;
+                                    background: is-running ? accent-coral.with-alpha(0.16) : accent-cyan.with-alpha(0.18);
+                                    border-width: 1.5px;
+                                    border-color: is-running ? accent-coral : accent-cyan;
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { run-or-stop(); }
+                                    }
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 7px;
+                                        VectorIcon {
+                                            y: (parent.height - self.height) / 2;
+                                            icon-color: is-running ? accent-coral : accent-cyan;
+                                            commands: is-running
+                                                ? "M 6 6 L 18 6 L 18 18 L 6 18 Z"
+                                                : "M 6 4 L 20 12 L 6 20 Z";
+                                        }
+                                        Text {
+                                            text: is-running ? "STOP" : (is-server ? "LISTEN" : "START TEST");
+                                            color: is-running ? accent-coral : accent-cyan;
+                                            font-size: 12px;
+                                            font-weight: 800;
+                                            letter-spacing: 1px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if graph-mode: VerticalLayout {
+                        vertical-stretch: 1;
+                        alignment: space-between;
+                        HorizontalLayout {
+                            alignment: space-between;
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text {
+                                    text: direction-label + " · REAL-TIME SERIES";
+                                    color: accent-cyan;
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    letter-spacing: 1px;
+                                }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Text {
+                                        text: gauge-value;
+                                        color: text-primary;
+                                        font-size: 34px;
+                                        font-weight: 800;
+                                    }
+                                    Text {
+                                        text: gauge-unit;
+                                        color: text-muted;
+                                        font-size: 14px;
+                                        font-weight: 600;
+                                        vertical-alignment: bottom;
+                                    }
+                                }
+                            }
+                            VerticalLayout {
+                                spacing: 4px;
+                                alignment: start;
+                                Text { text: graph-max-label; color: text-muted; font-size: 10px; horizontal-alignment: right; }
+                                Text { text: graph-mid-label; color: text-muted; font-size: 10px; horizontal-alignment: right; }
+                            }
+                        }
+                        HorizontalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 152px;
+                                height: 36px;
+                                border-radius: 18px;
+                                background: is-running ? accent-coral.with-alpha(0.16) : accent-cyan.with-alpha(0.18);
+                                border-width: 1.5px;
+                                border-color: is-running ? accent-coral : accent-cyan;
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { run-or-stop(); }
+                                }
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 7px;
+                                    VectorIcon {
+                                        y: (parent.height - self.height) / 2;
+                                        icon-color: is-running ? accent-coral : accent-cyan;
+                                        commands: is-running
+                                            ? "M 6 6 L 18 6 L 18 18 L 6 18 Z"
+                                            : "M 6 4 L 20 12 L 6 20 Z";
+                                    }
+                                    Text {
+                                        text: is-running ? "STOP" : (is-server ? "LISTEN" : "START TEST");
+                                        color: is-running ? accent-coral : accent-cyan;
+                                        font-size: 12px;
+                                        font-weight: 800;
+                                        letter-spacing: 1px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Bottom Strip: Summary + Export + Readiness Pills
+                    HorizontalLayout {
+                        alignment: space-between;
+                        Text {
+                            text: health-summary;
+                            color: text-muted;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            if has-report: HorizontalLayout {
+                                spacing: 5px;
+                                PillButton {
+                                    label: "PDF";
+                                    icon-commands: "M 12 3 L 12 15 M 7 10 L 12 15 L 17 10 M 4 19 L 20 19";
+                                    bg: bg-elevated;
+                                    border-col: border-col;
+                                    text-col: text-primary;
+                                    accent: accent-cyan;
+                                    clicked => { export-report("pdf"); }
+                                }
+                                PillButton {
+                                    label: "CSV";
+                                    bg: bg-elevated;
+                                    border-col: border-col;
+                                    text-col: text-primary;
+                                    accent: accent-cyan;
+                                    clicked => { export-report("csv"); }
+                                }
+                                PillButton {
+                                    label: "TXT";
+                                    bg: bg-elevated;
+                                    border-col: border-col;
+                                    text-col: text-primary;
+                                    accent: accent-cyan;
+                                    clicked => { export-report("txt"); }
+                                }
+                            }
+                            ReadinessPill {
+                                title: "4K Stream";
+                                status: ready-stream;
+                                pill-bg: bg-elevated;
+                                dot-color: health-level == 1 ? accent-emerald : health-level == 2 ? accent-amber : text-muted;
+                                text-primary: text-primary;
+                                text-muted: text-muted;
+                            }
+                            ReadinessPill {
+                                title: "Calls";
+                                status: ready-calls;
+                                pill-bg: bg-elevated;
+                                dot-color: health-level == 1 ? accent-emerald : health-level == 2 ? accent-amber : text-muted;
+                                text-primary: text-primary;
+                                text-muted: text-muted;
+                            }
+                            ReadinessPill {
+                                title: "Gaming";
+                                status: ready-gaming;
+                                pill-bg: bg-elevated;
+                                dot-color: health-level == 1 ? accent-emerald : health-level == 2 ? accent-amber : text-muted;
+                                text-primary: text-primary;
+                                text-muted: text-muted;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── 3. Four-Card Telemetry Grid ─────────────────────────────────────
+            HorizontalLayout {
+                spacing: 12px;
+                TelemetryCard {
+                    horizontal-stretch: 1;
+                    label: "THROUGHPUT";
+                    value: live-mbps;
+                    subtext: peak-mbps;
+                    spark-path: spark-throughput;
+                    card-bg: bg-card;
+                    border-col: border-col;
+                    text-primary: text-primary;
+                    text-muted: text-muted;
+                    accent: accent-cyan;
+                }
+                TelemetryCard {
+                    horizontal-stretch: 1;
+                    label: "RETRANSMITS";
+                    value: metric-retransmits;
+                    subtext: metric-retransmits-sub;
+                    card-bg: bg-card;
+                    border-col: border-col;
+                    text-primary: text-primary;
+                    text-muted: text-muted;
+                    accent: accent-emerald;
+                }
+                TelemetryCard {
+                    horizontal-stretch: 1;
+                    label: "JITTER";
+                    value: metric-jitter;
+                    subtext: metric-jitter-sub;
+                    card-bg: bg-card;
+                    border-col: border-col;
+                    text-primary: text-primary;
+                    text-muted: text-muted;
+                    accent: accent-amber;
+                }
+                TelemetryCard {
+                    horizontal-stretch: 1;
+                    label: "PACKET LOSS";
+                    value: metric-loss;
+                    subtext: metric-loss-sub;
+                    card-bg: bg-card;
+                    border-col: border-col;
+                    text-primary: text-primary;
+                    text-muted: text-muted;
+                    accent: accent-coral;
+                }
+            }
+
+            // ── 4. Collapsible History Drawer ───────────────────────────────────
+            if show-history: Rectangle {
+                background: bg-card;
+                border-width: 1px;
+                border-color: border-col;
+                border-radius: 14px;
+
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 10px;
+
+                    Text {
+                        text: "RECENT TARGETS";
+                        color: text-muted;
+                        font-size: 11px;
+                        font-weight: 700;
+                        letter-spacing: 0.6px;
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        for rh in recent-hosts: PillButton {
+                            label: rh;
+                            active: rh == host;
+                            bg: bg-elevated;
+                            border-col: border-col;
+                            text-col: text-primary;
+                            accent: accent-cyan;
+                            clicked => { select-recent-host(rh); }
+                        }
+                    }
+
+                    Text {
+                        text: "SESSION HISTORY";
+                        color: text-muted;
+                        font-size: 11px;
+                        font-weight: 700;
+                        letter-spacing: 0.6px;
+                    }
+                    if run-history.length == 0: Text {
+                        text: "No completed tests yet.";
+                        color: text-muted;
+                        font-size: 12px;
+                    }
+                    if run-history.length > 0: ScrollView {
+                        height: 92px;
+                        VerticalLayout {
+                            spacing: 4px;
+                            for entry in run-history: Text {
+                                text: entry;
+                                color: text-primary;
+                                font-size: 12px;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── 5. Collapsible Pro Inspector Drawer ─────────────────────────────
+            if show-pro: Rectangle {
+                background: bg-card;
+                border-width: 1px;
+                border-color: border-col;
+                border-radius: 14px;
+
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "Direction"; color: text-muted; font-size: 11px; }
+                            ComboBox {
+                                model: ["Upload", "Download (-R)", "Both (--bidir)"];
+                                current-index <=> direction-idx;
+                                enabled: !is-running;
+                                selected => { config-changed(); }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "Protocol"; color: text-muted; font-size: 11px; }
+                            ComboBox {
+                                model: ["TCP", "UDP (-u)", "SCTP (--sctp)"];
+                                current-index <=> protocol-idx;
+                                enabled: !is-running;
+                                selected => { config-changed(); }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "Streams (-P)"; color: text-muted; font-size: 11px; }
+                            LineEdit { text <=> parallel-streams; width: 64px; enabled: !is-running; edited => { config-changed(); } }
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "Duration (-t)"; color: text-muted; font-size: 11px; }
+                            LineEdit { text <=> duration-secs; width: 64px; enabled: !is-running; edited => { config-changed(); } }
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "Omit (-O)"; color: text-muted; font-size: 11px; }
+                            LineEdit { text <=> omit-secs; width: 64px; enabled: !is-running; edited => { config-changed(); } }
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "Interval (-i)"; color: text-muted; font-size: 11px; }
+                            LineEdit { text <=> interval-secs; width: 64px; enabled: !is-running; edited => { config-changed(); } }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "UDP Rate (-b)"; color: text-muted; font-size: 11px; }
+                            LineEdit { text <=> udp-bandwidth; width: 88px; enabled: !is-running; edited => { config-changed(); } }
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "Window (-w)"; color: text-muted; font-size: 11px; }
+                            LineEdit { text <=> window-size; width: 84px; placeholder-text: "auto"; enabled: !is-running; edited => { config-changed(); } }
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "MSS (-M)"; color: text-muted; font-size: 11px; }
+                            LineEdit { text <=> mss-size; width: 72px; placeholder-text: "auto"; enabled: !is-running; edited => { config-changed(); } }
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "DSCP"; color: text-muted; font-size: 11px; }
+                            LineEdit { text <=> dscp-val; width: 68px; placeholder-text: "EF"; enabled: !is-running; edited => { config-changed(); } }
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "Bind IP (-B)"; color: text-muted; font-size: 11px; }
+                            LineEdit { text <=> bind-ip; width: 105px; placeholder-text: "any"; enabled: !is-running; edited => { config-changed(); } }
+                        }
+                        VerticalLayout {
+                            spacing: 3px;
+                            horizontal-stretch: 1;
+                            Text { text: "External iperf3 (optional)"; color: text-muted; font-size: 11px; }
+                            LineEdit { text <=> custom-iperf-path; placeholder-text: "built-in pure-Rust engine"; enabled: !is-running; }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        alignment: space-between;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            CheckBox {
+                                text: "Server Auto-Stop (-1)";
+                                checked <=> server-one-off;
+                                enabled: !is-running;
+                                toggled => { config-changed(); }
+                            }
+                            Text {
+                                text: cli-preview;
+                                color: text-muted;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                        PillButton {
+                            label: show-logs ? "Hide Log" : "Console Log";
+                            icon-commands: "M 4 17 L 10 11 L 4 5 M 12 19 L 20 19";
+                            active: show-logs;
+                            bg: bg-elevated;
+                            border-col: border-col;
+                            text-col: text-primary;
+                            accent: accent-cyan;
+                            clicked => { show-logs = !show-logs; }
+                        }
+                    }
+                }
+            }
+
+            // ── 5. Collapsible Console Log ──────────────────────────────────────
+            if show-logs: Rectangle {
+                background: bg-card;
+                border-width: 1px;
+                border-color: border-col;
+                border-radius: 10px;
+                height: 96px;
+                ScrollView {
+                    Text {
+                        text: log-output;
+                        color: text-muted;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}
