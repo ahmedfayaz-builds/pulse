@@ -200,9 +200,21 @@ async fn run_native_client(
     };
 
     let target = format!("{host}:{}", cfg.port);
-    let mut ctrl = TcpStream::connect(&target).await?;
-    ctrl.set_nodelay(true)?;
-    let peer_addr = ctrl.peer_addr()?;
+    let target_addrs: Vec<SocketAddr> = tokio::net::lookup_host(&target)
+        .await
+        .map_err(|e| anyhow::anyhow!("Cannot resolve {target}: {e}"))?
+        .collect();
+    let peer_addr = *target_addrs
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("No address found for {target}"))?;
+
+    let mut ctrl = tokio::time::timeout(
+        Duration::from_secs(4),
+        connect_tcp_with_opts(peer_addr, cfg.bind_addr, cfg.window_bytes),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Connection timed out reaching {target} (check IP or server listener)"))?
+    .map_err(|e| anyhow::anyhow!("Connection to {target} failed: {e}"))?;
 
     let cookie = generate_cookie();
     ctrl.write_all(&cookie).await?;
@@ -267,8 +279,12 @@ async fn run_native_client(
             sock.send(&123_456_789_u32.to_be_bytes()).await?;
             udp_sockets.push(Arc::new(sock));
         } else {
-            let s = connect_tcp_with_opts(peer_addr, cfg.bind_addr, cfg.window_bytes).await?;
-            let mut s = s;
+            let mut s = tokio::time::timeout(
+                Duration::from_secs(4),
+                connect_tcp_with_opts(peer_addr, cfg.bind_addr, cfg.window_bytes),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("Timed out opening TCP data stream"))??;
             s.write_all(&cookie).await?;
             tcp_streams.push(s);
         }
@@ -313,10 +329,19 @@ async fn run_native_client(
             let tok = stream_cancel.clone();
             let dir = cfg.direction;
             worker_handles.push(tokio::spawn(async move {
-                if dir == Direction::ReverseDownload {
-                    run_udp_recv_loop(sock, c, tok).await;
-                } else {
-                    run_udp_send_loop(sock, blksize, per_stream_bps, burst_pkts, total_limit, c, tok).await;
+                match dir {
+                    Direction::ReverseDownload => run_udp_recv_loop(sock, c, tok).await,
+                    Direction::Upload => {
+                        run_udp_send_loop(sock, blksize, per_stream_bps, burst_pkts, total_limit, c, tok).await;
+                    }
+                    Direction::Bidirectional => {
+                        let s_recv = Arc::clone(&sock);
+                        let c_recv = Arc::clone(&c);
+                        let t_recv = tok.clone();
+                        let r_handle = tokio::spawn(run_udp_recv_loop(s_recv, c_recv, t_recv));
+                        run_udp_send_loop(sock, blksize, per_stream_bps, burst_pkts, total_limit, c, tok).await;
+                        let _ = r_handle.await;
+                    }
                 }
             }));
         }
@@ -570,8 +595,16 @@ async fn run_native_server(
             let blk = params.len.max(64);
             let bw = params.bandwidth.max(1_000_000);
             let rev = params.reverse;
+            let bidir = params.bidirectional;
             workers.push(tokio::spawn(async move {
-                if rev {
+                if bidir {
+                    let s_recv = Arc::clone(&udp_sock);
+                    let c_recv = Arc::clone(&c);
+                    let t_recv = tok.clone();
+                    let r_handle = tokio::spawn(run_udp_recv_loop(s_recv, c_recv, t_recv));
+                    run_udp_send_loop(udp_sock, blk, bw, 1, None, c, tok).await;
+                    let _ = r_handle.await;
+                } else if rev {
                     run_udp_send_loop(udp_sock, blk, bw, 1, None, c, tok).await;
                 } else {
                     run_udp_recv_loop(udp_sock, c, tok).await;
@@ -645,6 +678,19 @@ async fn run_native_server(
                         prev_bytes[i] = cur;
                     }
                     let bps = (sum_delta as f64 * 8.0) / dt;
+                    let (jit, lost, pkts, loss_pct) = if is_udp {
+                        let j: f64 = counters
+                            .iter()
+                            .map(|c| c.jitter_us.load(Ordering::Relaxed) as f64 / 1000.0)
+                            .sum::<f64>()
+                            / counters.len().max(1) as f64;
+                        let l: u64 = counters.iter().map(|c| c.lost.load(Ordering::Relaxed)).sum();
+                        let p: u64 = counters.iter().map(|c| c.packets.load(Ordering::Relaxed)).sum();
+                        let pct = if p > 0 { (l as f64 / p as f64) * 100.0 } else { 0.0 };
+                        (Some(j), Some(l), Some(p), Some(pct))
+                    } else {
+                        (None, None, None, None)
+                    };
                     let _ = tx.send(TelemetryMsg::Event(IperfEvent::Interval(IntervalData {
                         streams: vec![],
                         sum: Some(SumTick {
@@ -652,10 +698,10 @@ async fn run_native_server(
                             end: now,
                             bits_per_second: bps,
                             retransmits: if is_udp { None } else { Some(0) },
-                            jitter_ms: None,
-                            lost_packets: None,
-                            packets: None,
-                            lost_percent: None,
+                            jitter_ms: jit,
+                            lost_packets: lost,
+                            packets: pkts,
+                            lost_percent: loss_pct,
                             omitted: Some(false),
                         }),
                     }))).await;
@@ -676,6 +722,42 @@ async fn run_native_server(
         let _ = write_json_frame(&mut ctrl, &server_res).await;
         let _ = write_state(&mut ctrl, DISPLAY_RESULTS).await;
         let _ = read_state(&mut ctrl).await; // IPERF_DONE
+
+        let total_bytes: u64 = counters.iter().map(|c| c.bytes.load(Ordering::Relaxed)).sum();
+        let avg_bps = (total_bytes as f64 * 8.0) / elapsed;
+        let (jit, lost, pkts, loss_pct) = if is_udp {
+            let j: f64 = counters
+                .iter()
+                .map(|c| c.jitter_us.load(Ordering::Relaxed) as f64 / 1000.0)
+                .sum::<f64>()
+                / counters.len().max(1) as f64;
+            let l: u64 = counters.iter().map(|c| c.lost.load(Ordering::Relaxed)).sum();
+            let p: u64 = counters.iter().map(|c| c.packets.load(Ordering::Relaxed)).sum();
+            let pct = if p > 0 { (l as f64 / p as f64) * 100.0 } else { 0.0 };
+            (Some(j), Some(l), Some(p), Some(pct))
+        } else {
+            (None, None, None, None)
+        };
+        let end_tick = SumTick {
+            start: 0.0,
+            end: elapsed,
+            bits_per_second: avg_bps,
+            retransmits: if is_udp { None } else { Some(0) },
+            jitter_ms: jit,
+            lost_packets: lost,
+            packets: pkts,
+            lost_percent: loss_pct,
+            omitted: Some(false),
+        };
+        let _ = tx
+            .send(TelemetryMsg::Event(IperfEvent::End(EndData {
+                streams: vec![],
+                sum_sent: if is_udp { None } else { Some(end_tick.clone()) },
+                sum_received: if is_udp { None } else { Some(end_tick.clone()) },
+                sum: if is_udp { Some(end_tick) } else { None },
+                cpu_utilization_percent: None,
+            })))
+            .await;
 
         if one_off {
             break;

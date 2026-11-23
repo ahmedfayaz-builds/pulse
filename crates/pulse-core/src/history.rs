@@ -88,6 +88,13 @@ impl AppHistory {
         self.runs.truncate(30);
         self.save();
     }
+
+    /// Clears saved run history and resets recent targets to the current host.
+    pub fn clear(&mut self) {
+        self.recent_hosts = vec![self.last_host.clone()];
+        self.runs.clear();
+        self.save();
+    }
 }
 
 #[cfg(test)]

@@ -203,21 +203,22 @@ fn build_wave_paths(samples_mbps: &[f64]) -> (String, String) {
     if samples_mbps.is_empty() {
         return (String::new(), String::new());
     }
-    let max_val = samples_mbps.iter().copied().fold(10.0_f64, f64::max) * 1.25;
+    let step = (samples_mbps.len() / 180).max(1);
+    let view: Vec<f64> = samples_mbps.iter().step_by(step).copied().collect();
+    let max_val = view.iter().copied().fold(10.0_f64, f64::max) * 1.25;
     let w = 900.0;
     let h_bot = 280.0;
     let h_top = 80.0; // keep wave gracefully below header pills
     let span_y = h_bot - h_top;
 
-    let pts: Vec<(f64, f64)> = if samples_mbps.len() == 1 {
-        let y = h_bot - (samples_mbps[0] / max_val).clamp(0.0, 1.0) * span_y * 0.65;
+    let pts: Vec<(f64, f64)> = if view.len() == 1 {
+        let y = h_bot - (view[0] / max_val).clamp(0.0, 1.0) * span_y * 0.65;
         vec![(0.0, y), (w, y)]
     } else {
-        samples_mbps
-            .iter()
+        view.iter()
             .enumerate()
             .map(|(i, &v)| {
-                let x = (i as f64 / (samples_mbps.len() - 1) as f64) * w;
+                let x = (i as f64 / (view.len() - 1) as f64) * w;
                 let y = h_bot - (v / max_val).clamp(0.0, 1.0) * span_y * 0.72 - 18.0;
                 (x, y)
             })
@@ -318,6 +319,19 @@ fn main() -> Result<(), slint::PlatformError> {
                     let cfg = build_config_from_ui(&ui);
                     ui.set_cli_preview(cfg.to_cli_string().into());
                 }
+            }
+        });
+    }
+
+    // Clear history
+    {
+        let ui_weak = ui.as_weak();
+        let hist_slot = Arc::clone(&history);
+        ui.on_clear_history(move || {
+            let mut h = hist_slot.lock().unwrap();
+            h.clear();
+            if let Some(ui) = ui_weak.upgrade() {
+                sync_history_to_ui(&ui, &h);
             }
         });
     }
@@ -486,13 +500,16 @@ fn main() -> Result<(), slint::PlatformError> {
             let hist_for_task = Arc::clone(&hist_slot);
 
             handle.spawn(async move {
-                let res = match custom_bin {
-                    Some(bin) => run_iperf(bin, args, tx.clone(), token).await,
-                    None => run_native(cfg, tx.clone(), token).await,
-                };
-                if let Err(e) = res {
-                    let _ = tx.send(TelemetryMsg::ErrorLog(format!("Engine error: {e}"))).await;
-                    let _ = tx.send(TelemetryMsg::Exited(Some(1))).await;
+                match custom_bin {
+                    Some(bin) => {
+                        if let Err(e) = run_iperf(bin, args, tx.clone(), token).await {
+                            let _ = tx.send(TelemetryMsg::ErrorLog(format!("Spawn error: {e}"))).await;
+                            let _ = tx.send(TelemetryMsg::Exited(Some(1))).await;
+                        }
+                    }
+                    None => {
+                        let _ = run_native(cfg, tx, token).await;
+                    }
                 }
             });
 
@@ -614,9 +631,25 @@ fn main() -> Result<(), slint::PlatformError> {
                                 });
                             }
                         }
-                        TelemetryMsg::RawLog(line) | TelemetryMsg::ErrorLog(line) => {
+                        TelemetryMsg::RawLog(line) => {
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(u) = ui_w.upgrade() {
+                                    let mut cur = u.get_log_output().to_string();
+                                    if cur.len() > 8192 {
+                                        cur.drain(..4096);
+                                    }
+                                    cur.push_str(&line);
+                                    cur.push('\n');
+                                    u.set_log_output(cur.into());
+                                }
+                            });
+                        }
+                        TelemetryMsg::ErrorLog(line) => {
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(u) = ui_w.upgrade() {
+                                    u.set_health_summary(line.clone().into());
+                                    u.set_health_badge("ERROR".into());
+                                    u.set_health_level(3);
                                     let mut cur = u.get_log_output().to_string();
                                     cur.push_str(&line);
                                     cur.push('\n');

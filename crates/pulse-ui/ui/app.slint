@@ -345,6 +345,7 @@ export component AppWindow inherits Window {
     callback config-changed();
     callback export-report(string);
     callback select-recent-host(string);
+    callback clear-history();
     callback theme-toggled(bool);
 
     background: bg-canvas;
@@ -906,12 +907,24 @@ export component AppWindow inherits Window {
                     padding: 14px;
                     spacing: 10px;
 
-                    Text {
-                        text: "RECENT TARGETS";
-                        color: text-muted;
-                        font-size: 11px;
-                        font-weight: 700;
-                        letter-spacing: 0.6px;
+                    HorizontalLayout {
+                        alignment: space-between;
+                        Text {
+                            text: "RECENT TARGETS";
+                            color: text-muted;
+                            font-size: 11px;
+                            font-weight: 700;
+                            letter-spacing: 0.6px;
+                            vertical-alignment: center;
+                        }
+                        PillButton {
+                            label: "Clear History";
+                            bg: bg-elevated;
+                            border-col: border-col;
+                            text-col: text-muted;
+                            accent: accent-coral;
+                            clicked => { clear-history(); }
+                        }
                     }
                     HorizontalLayout {
                         spacing: 6px;
