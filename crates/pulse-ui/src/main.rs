@@ -6,7 +6,7 @@ use pulse_core::health::{build_verdict, HealthStatus};
 use pulse_core::history::{AppHistory, RunRecord};
 use pulse_core::parser::{IperfEvent, TelemetryMsg};
 use pulse_core::report::{IntervalSample, SessionReport};
-use pulse_core::runner::run_iperf;
+use pulse_core::runner::{resolve_iperf3_binary, run_iperf};
 use slint::{ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::f64::consts::PI;
@@ -43,10 +43,12 @@ fn parse_size_bytes(s: &str) -> Option<u64> {
     if t.is_empty() {
         return None;
     }
-    if let Some(num) = t.strip_suffix('M') {
-        num.parse::<u64>().ok().map(|v| v * 1024 * 1024)
+    if let Some(num) = t.strip_suffix('G') {
+        num.parse::<f64>().ok().map(|v| (v * 1024.0 * 1024.0 * 1024.0) as u64)
+    } else if let Some(num) = t.strip_suffix('M') {
+        num.parse::<f64>().ok().map(|v| (v * 1024.0 * 1024.0) as u64)
     } else if let Some(num) = t.strip_suffix('K') {
-        num.parse::<u64>().ok().map(|v| v * 1024)
+        num.parse::<f64>().ok().map(|v| (v * 1024.0) as u64)
     } else {
         t.parse::<u64>().ok()
     }
@@ -388,6 +390,7 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.on_config_changed(move || {
             if let Some(ui) = ui_weak.upgrade() {
                 let cfg = build_config_from_ui(&ui);
+                ui.set_active_preset(-1);
                 ui.set_cli_preview(cfg.to_cli_string().into());
                 ui.set_direction_label(match cfg.direction {
                     Direction::Upload => "UPLOAD".into(),
@@ -441,13 +444,12 @@ fn main() -> Result<(), slint::PlatformError> {
             let custom_bin = if custom.is_empty() {
                 None
             } else {
-                let pb = std::path::PathBuf::from(&custom);
-                if !pb.is_file() {
+                let Some(pb) = resolve_iperf3_binary(Some(&custom)) else {
                     ui.set_status_text("BAD PATH".into());
                     ui.set_status_kind(3);
-                    ui.set_health_summary("Custom iperf3 path does not exist.".into());
+                    ui.set_health_summary("Custom iperf3 binary not found in path or PATH.".into());
                     return;
-                }
+                };
                 Some(pb)
             };
 
@@ -658,9 +660,30 @@ fn main() -> Result<(), slint::PlatformError> {
                             });
                         }
                         TelemetryMsg::Exited(code) => {
+                            let mut has_rep = rep_for_task.lock().unwrap().is_some();
+                            if !has_rep && !report_samples.is_empty() {
+                                let avg = samples.iter().sum::<f64>() / samples.len() as f64;
+                                let last = report_samples.last().unwrap();
+                                let verdict = build_verdict(last.retransmits, last.jitter_ms, last.loss_percent);
+                                let report = SessionReport::from_session(
+                                    &cfg_for_report,
+                                    avg,
+                                    peak.max(avg),
+                                    last.retransmits,
+                                    last.jitter_ms,
+                                    last.loss_percent,
+                                    &verdict,
+                                    report_samples.clone(),
+                                );
+                                *rep_for_task.lock().unwrap() = Some(report);
+                                has_rep = true;
+                            }
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(u) = ui_w.upgrade() {
                                     u.set_is_running(false);
+                                    if has_rep {
+                                        u.set_has_report(true);
+                                    }
                                     let ok = code == Some(0);
                                     u.set_status_text(if ok { "COMPLETE" } else { "STOPPED" }.into());
                                     u.set_status_kind(if ok { 2 } else { 3 });

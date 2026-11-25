@@ -4,7 +4,7 @@ use crate::parser::{
     StartData, StreamTick, SumTick, TelemetryMsg, TestStartInfo,
 };
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -199,22 +199,20 @@ async fn run_native_client(
         _ => anyhow::bail!("Expected Client mode"),
     };
 
-    let target = format!("{host}:{}", cfg.port);
-    let target_addrs: Vec<SocketAddr> = tokio::net::lookup_host(&target)
+    let target_label = format!("{host}:{}", cfg.port);
+    let peer_addr = tokio::net::lookup_host((host, cfg.port))
         .await
-        .map_err(|e| anyhow::anyhow!("Cannot resolve {target}: {e}"))?
-        .collect();
-    let peer_addr = *target_addrs
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("No address found for {target}"))?;
+        .map_err(|e| anyhow::anyhow!("Cannot resolve {target_label}: {e}"))?
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("No address found for {target_label}"))?;
 
     let mut ctrl = tokio::time::timeout(
         Duration::from_secs(4),
         connect_tcp_with_opts(peer_addr, cfg.bind_addr, cfg.window_bytes),
     )
     .await
-    .map_err(|_| anyhow::anyhow!("Connection timed out reaching {target} (check IP or server listener)"))?
-    .map_err(|e| anyhow::anyhow!("Connection to {target} failed: {e}"))?;
+    .map_err(|_| anyhow::anyhow!("Connection timed out reaching {target_label} (check IP or server listener)"))?
+    .map_err(|e| anyhow::anyhow!("Connection to {target_label} failed: {e}"))?;
 
     let cookie = generate_cookie();
     ctrl.write_all(&cookie).await?;
@@ -545,11 +543,8 @@ async fn run_native_server(
     tx: &mpsc::Sender<TelemetryMsg>,
     cancel: &CancellationToken,
 ) -> anyhow::Result<()> {
-    let bind_ip = cfg
-        .bind_addr
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|| "0.0.0.0".into());
-    let bind_addr: SocketAddr = format!("{bind_ip}:{}", cfg.port).parse()?;
+    let bind_ip = cfg.bind_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let bind_addr = SocketAddr::new(bind_ip, cfg.port);
     let listener = TcpListener::bind(bind_addr).await?;
     let local_addr = listener.local_addr()?;
 
@@ -564,16 +559,27 @@ async fn run_native_server(
             _ = cancel.cancelled() => break,
             res = listener.accept() => res?,
         };
-        ctrl.set_nodelay(true)?;
+        let _ = ctrl.set_nodelay(true);
 
         let mut cookie = [0u8; COOKIE_SIZE];
-        if ctrl.read_exact(&mut cookie).await.is_err() {
+        if tokio::time::timeout(Duration::from_secs(5), ctrl.read_exact(&mut cookie))
+            .await
+            .is_err()
+        {
             continue;
         }
 
-        write_state(&mut ctrl, PARAM_EXCHANGE).await?;
-        let params: WireParams = read_json_frame(&mut ctrl).await?;
-        write_state(&mut ctrl, CREATE_STREAMS).await?;
+        if write_state(&mut ctrl, PARAM_EXCHANGE).await.is_err() {
+            continue;
+        }
+        let Ok(Ok(params)) =
+            tokio::time::timeout(Duration::from_secs(5), read_json_frame::<WireParams>(&mut ctrl)).await
+        else {
+            continue;
+        };
+        if write_state(&mut ctrl, CREATE_STREAMS).await.is_err() {
+            continue;
+        }
 
         let is_udp = params.udp.unwrap_or(false);
         let n_streams = params.parallel.max(1) as usize;
